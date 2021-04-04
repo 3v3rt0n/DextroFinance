@@ -1,2 +1,13 @@
 # contracts
 uranium.finance contracts
+
+FeeManager: [0x2ae88d2981E8601265978565AD8d1f85AE47552d] (https://bscscan.com/address/0x2ae88d2981E8601265978565AD8d1f85AE47552d)
+MasterUranium: [0xD5aAc41D315c1d382DcF1C39D4ed9B37C224edf2] (https://bscscan.com/address/0xD5aAc41D315c1d382DcF1C39D4ed9B37C224edf2)
+Multicall: [0xE8Be41B3799BF1436B3CA8A55FaCe997b5dcFB30] (https://bscscan.com/address/0xE8Be41B3799BF1436B3CA8A55FaCe997b5dcFB30)
+RadsToken: [0x7ca1eBC56496E3D78E56D71A127ea9d1717c4bE0] (https://bscscan.com/address/0x7ca1eBC56496E3D78E56D71A127ea9d1717c4bE0)
+SRadsToken: [0xbe3C147a45D731154B18dc0Ff5e119c9b84e6699] (https://bscscan.com/address/0xbe3C147a45D731154B18dc0Ff5e119c9b84e6699)
+Timelock: [0xBE9ecaF37bcB7e823f3d26b7beFD0A851081FC4d] (https://bscscan.com/address/0xBE9ecaF37bcB7e823f3d26b7beFD0A851081FC4d)
+UraniumBonusAggregator: [0xd4F8355299365Fce3aB79754773F053ec6E898F4] (https://bscscan.com/address/0xd4F8355299365Fce3aB79754773F053ec6E898F4)
+UraniumFactory : [0x2C39801cc496E01B163CD3314295C30A98A26ef3] (https://bscscan.com/address/0x2C39801cc496E01B163CD3314295C30A98A26ef3)
+UraniumMoneyPot: [0x29d51CdB835CDD08C28d78c0203eeD4439a8cc6a] (https://bscscan.com/address/0x29d51CdB835CDD08C28d78c0203eeD4439a8cc6a)
+UraniumRouter : [0x9a04b598CA32D3e9CDF366f34B2B4d41EF5f027F] (https://bscscan.com/address/0x9a04b598CA32D3e9CDF366f34B2B4d41EF5f027F)
