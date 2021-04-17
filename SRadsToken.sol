@@ -2,80 +2,69 @@ pragma solidity 0.6.12;
 
 import "@pancakeswap/pancake-swap-lib/contracts/math/SafeMath.sol";
 import "./libs/UraniumBEP20.sol";
-import "./RadsToken.sol";
-import "./UraniumMoneyPot.sol";
+import "./interfaces/IMoneyPot.sol";
 
-// RadsToken with Governance.
-contract SRadsToken is UraniumBEP20("Uranium ShareRads", "sRADS") {
+// SRadsToken with Governance.
+contract SRadsToken is UraniumBEP20("Uranium share token U235", "U235") {
     using SafeMath for uint256;
-    using SafeMath for uint8;
 
     struct HolderInfo {
-        uint256 amount;
         uint256 avgTransactionBlock;
-        uint256 amountSwapped;
     }
 
-    address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
-    UraniumMoneyPot public moneyPot;
-    RadsToken public rads;
+    IMoneyPot public moneyPot;
+    UraniumBEP20 public rads;
     bool private _isRadsSetup = false;
     bool private _isMoneyPotSetup = false;
 
-    uint256 public immutable SWAP_PENALTY_MAX_PERIOD ; // after 24h penalty of holding sRads. Swap penalty is at the minimum
-    uint8 public immutable SWAP_PENALTY_MAX_PER_SRADS ; // 30% => 1 srads = 0.3 rads
+    uint256 public immutable SWAP_PENALTY_MAX_PERIOD ; // after 72h penalty of holding sRads. Swap penalty is at the minimum
+    uint256 public immutable SWAP_PENALTY_MAX_PER_SRADS ; // 30% => 1 srads = 0.3 rads
 
     mapping(address => HolderInfo) public holdersInfo;
 
-    constructor (uint256 swapPenaltyMaxPeriod, uint8 swapPenaltyMaxPerSRads) public{
+    constructor (uint256 swapPenaltyMaxPeriod, uint256 swapPenaltyMaxPerSRads) public{
         SWAP_PENALTY_MAX_PERIOD = swapPenaltyMaxPeriod; // default 28800: after 24h penalty of holding sRads. Swap penalty is at the minimum
-        SWAP_PENALTY_MAX_PER_SRADS = swapPenaltyMaxPerSRads; // 30% => 1 srads = 0.3 rads
+        SWAP_PENALTY_MAX_PER_SRADS = swapPenaltyMaxPerSRads.mul(1e10); // default: 30, 30% => 1 srads = 0.3 rads
     }
 
-    function setupRads(RadsToken _rads) external onlyOwner {
-        require(!_isRadsSetup, "Rads: already setup");
+    function setupRads(UraniumBEP20 _rads) external onlyOwner {
+        require(!_isRadsSetup);
         rads = _rads;
         _isRadsSetup = true;
     }
 
-    function setupMoneyPot(UraniumMoneyPot _moneyPot) external onlyOwner {
-        require(!_isMoneyPotSetup, "MoneyPot already setup");
+    function setupMoneyPot(IMoneyPot _moneyPot) external onlyOwner {
+        require(!_isMoneyPotSetup);
         moneyPot = _moneyPot;
         _isMoneyPotSetup = true;
     }
 
-    /**
-     * @dev Returns true if the caller is the current owner.
-     */
-    function isOwner() public view returns (bool) {
-        return msg.sender == owner();
+    /* Calculate the penality for swapping srads to rads for a user.
+       The penality decrease over time (by holding duration).
+       From SWAP_PENALTY_MAX_PER_SRADS % to 0% on SWAP_PENALTY_MAX_PERIOD
+    */
+    function getPenaltyPercent(address _holderAddress) public view returns (uint256){
+        HolderInfo storage holderInfo = holdersInfo[_holderAddress];
+        if(block.number >= holderInfo.avgTransactionBlock.add(SWAP_PENALTY_MAX_PERIOD)){
+            return 0;
+        }
+        if(block.number == holderInfo.avgTransactionBlock){
+            return SWAP_PENALTY_MAX_PER_SRADS;
+        }
+        uint256 avgHoldingDuration = block.number.sub(holderInfo.avgTransactionBlock);
+        return SWAP_PENALTY_MAX_PER_SRADS.sub(
+            SWAP_PENALTY_MAX_PER_SRADS.mul(avgHoldingDuration).div(SWAP_PENALTY_MAX_PERIOD)
+        );
     }
 
-    /**
-     * @dev Returns true if the caller is the rads contract.
-     */
-    function isRads() internal view returns (bool) {
-        return msg.sender == address(rads);
-    }
-
+    /* Allow use to exchange (swap) their srads to rads */
     function swapToRads(uint256 _amount) external {
         require(_amount > 0, "amount 0");
         address _from = msg.sender;
         uint256 radsAmount = _swapRadsAmount( _from, _amount);
+        holdersInfo[_from].avgTransactionBlock = _getAvgTransactionBlock(_from, holdersInfo[_from], _amount, true);
         super._burn(_from, _amount);
-        holdersInfo[_from].avgTransactionBlock = _getAvgTransactionBlock(holdersInfo[_from], _amount, true);
-        holdersInfo[_from].amount = holdersInfo[_from].amount.sub(_amount);
-        if (holdersInfo[_from].amount > 0) {
-            uint256 amountTRadsSwapped = getSRadsAtMinPenalty(_from);
-            if (amountTRadsSwapped > _amount){
-                amountTRadsSwapped = amountTRadsSwapped.sub(_amount);
-            }
-            holdersInfo[_from].amountSwapped = holdersInfo[_from].amountSwapped.add(amountTRadsSwapped);
-        }
-        else{
-            holdersInfo[_from].amountSwapped = 0;
-        }
         rads.mint(_from, radsAmount);
 
         if (address(moneyPot) != address(0)) {
@@ -84,51 +73,31 @@ contract SRadsToken is UraniumBEP20("Uranium ShareRads", "sRADS") {
     }
 
     /* @notice Preview swap return in rads with _sRadsAmount by _holderAddress
-    *  this function used by front-end to show how much rads will be retrieve if _holderAddress swap _sRadsAmount
+    *  this function is used by front-end to show how much rads will be retrieve if _holderAddress swap _sRadsAmount
     */
     function previewSwapRadsExpectedAmount(address _holderAddress, uint256 _sRadsAmount) external view returns (uint256 expectedRads){
         return _swapRadsAmount( _holderAddress, _sRadsAmount);
     }
 
-    function getSRadsAtMinPenalty(address _holderAddress) public view returns (uint256){
-        HolderInfo storage holderInfo = holdersInfo[_holderAddress];
-        if(holderInfo.avgTransactionBlock.add(SWAP_PENALTY_MAX_PERIOD) <= block.number ){
-            return holderInfo.amount;
-        }
-        return (((block.number.sub(holderInfo.avgTransactionBlock)).mul(1000).div(SWAP_PENALTY_MAX_PERIOD))
-                .mul(holderInfo.amount.sub(holderInfo.amountSwapped))).div(1000);
-    }
-
     /* @notice Calculate the adjustment for a user if he want to swap _sRadsAmount to rads */
     function _swapRadsAmount(address _holderAddress, uint256 _sRadsAmount) internal view returns (uint256 expectedRads){
-        HolderInfo storage holderInfo = holdersInfo[_holderAddress];
-        require(holderInfo.amount >= _sRadsAmount, "Not enough sRADS");
-        if(block.number >= holderInfo.avgTransactionBlock.add(SWAP_PENALTY_MAX_PERIOD)){
+        require(balanceOf(_holderAddress) >= _sRadsAmount, "Not enough sRADS");
+        uint256 penalty = getPenaltyPercent(_holderAddress);
+        if(penalty == 0){
             return _sRadsAmount;
         }
 
-        uint256 _sRadsAtMinPenalty = getSRadsAtMinPenalty(_holderAddress);
-
-        if (_sRadsAtMinPenalty >= _sRadsAmount){
-            return _sRadsAmount;
-        }
-
-        uint256 swapPenaltyPerSRads = SWAP_PENALTY_MAX_PER_SRADS.sub(
-            (_sRadsAtMinPenalty.div(holderInfo.amount)).mul(SWAP_PENALTY_MAX_PER_SRADS)
-        );
-        uint256 _sRadsWithPenalty = _sRadsAmount.sub(_sRadsAtMinPenalty);
-        uint256 _radsForSRadsWithPenalty = _sRadsWithPenalty.sub(_sRadsWithPenalty.mul(swapPenaltyPerSRads).div(100));
-        return _radsForSRadsWithPenalty.add(_sRadsAtMinPenalty);
+        return _sRadsAmount.sub(_sRadsAmount.mul(penalty).div(1e12));
     }
 
     /* @notice Calculate average deposit/withdraw block for _holderAddress */
-    function _getAvgTransactionBlock(HolderInfo storage holderInfo, uint256 _sRadsAmount, bool _onWithdraw) internal view returns (uint256){
-        if (holderInfo.amount == 0) {
+    function _getAvgTransactionBlock(address _holderAddress, HolderInfo storage holderInfo, uint256 _sRadsAmount, bool _onWithdraw) internal view returns (uint256){
+        if (balanceOf(_holderAddress) == 0) {
             return block.number;
         }
         uint256 transactionBlockWeight;
         if (_onWithdraw) {
-            if (holderInfo.amount == _sRadsAmount) {
+            if (balanceOf(_holderAddress) == _sRadsAmount) {
                 return 0;
             }
             else {
@@ -136,18 +105,17 @@ contract SRadsToken is UraniumBEP20("Uranium ShareRads", "sRADS") {
             }
         }
         else {
-            transactionBlockWeight = (holderInfo.amount.mul(holderInfo.avgTransactionBlock).add(block.number.mul(_sRadsAmount)));
+            transactionBlockWeight = (balanceOf(_holderAddress).mul(holderInfo.avgTransactionBlock).add(block.number.mul(_sRadsAmount)));
         }
-        return transactionBlockWeight.div(holderInfo.amount.add(_sRadsAmount));
+        return transactionBlockWeight.div(balanceOf(_holderAddress).add(_sRadsAmount));
     }
 
 
     /// @notice Creates `_amount` token to `_to`.
-    function mint(address _to, uint256 _amount) external onlyOwner() {
+    function mint(address _to, uint256 _amount) external virtual override onlyOwner {
         HolderInfo storage holder = holdersInfo[_to];
+        holder.avgTransactionBlock = _getAvgTransactionBlock(_to, holder, _amount, false);
         _mint(_to, _amount);
-        holder.avgTransactionBlock = _getAvgTransactionBlock(holder, _amount, false);
-        holder.amount = holder.amount.add(_amount);
         _moveDelegates(address(0), _delegates[_to], _amount);
 
         if (address(moneyPot) != address(0)) {
@@ -155,20 +123,17 @@ contract SRadsToken is UraniumBEP20("Uranium ShareRads", "sRADS") {
         }
     }
 
-    /// @dev overrides transfer function to meet tokenomics of RADS
+    /// @dev overrides transfer function to meet tokenomics of SRADS
     function _transfer(address _sender, address _recipient, uint256 _amount) internal virtual override {
-        holdersInfo[_sender].avgTransactionBlock = _getAvgTransactionBlock(holdersInfo[_sender], _amount, true);
-        holdersInfo[_sender].amount = holdersInfo[_sender].amount.sub(_amount);
+        holdersInfo[_sender].avgTransactionBlock = _getAvgTransactionBlock(_sender, holdersInfo[_sender], _amount, true);
         if (_recipient == BURN_ADDRESS) {
             super._burn(_sender, _amount);
             if (address(moneyPot) != address(0)) {
                 moneyPot.updateSRadsHolder(_sender);
             }
-            emit Transfer(_sender, _recipient, 0);
         } else {
+            holdersInfo[_recipient].avgTransactionBlock = _getAvgTransactionBlock(_recipient, holdersInfo[_recipient], _amount, false);
             super._transfer(_sender, _recipient, _amount);
-            holdersInfo[_recipient].avgTransactionBlock = _getAvgTransactionBlock(holdersInfo[_recipient], _amount, false);
-            holdersInfo[_recipient].amount = holdersInfo[_recipient].amount.add(_amount);
 
             if (address(moneyPot) != address(0)) {
                 moneyPot.updateSRadsHolder(_sender);
@@ -177,7 +142,6 @@ contract SRadsToken is UraniumBEP20("Uranium ShareRads", "sRADS") {
                 }
             }
         }
-
     }
 
     // Copied and modified from YAM code:

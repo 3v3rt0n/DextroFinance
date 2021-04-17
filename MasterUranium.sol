@@ -5,23 +5,14 @@ import "@pancakeswap/pancake-swap-lib/contracts/token/BEP20/IBEP20.sol";
 import "@pancakeswap/pancake-swap-lib/contracts/token/BEP20/SafeBEP20.sol";
 import "@pancakeswap/pancake-swap-lib/contracts/access/Ownable.sol";
 
-import "./RadsToken.sol";
-import "./SRadsToken.sol";
 import "./UraniumBonusAggregator.sol";
+import "./libs/UraniumBEP20.sol";
 
-// import "@nomiclabs/buidler/console.sol";
-
-// MasterUranium is the master of RADS AND THO.
-// He can make Rads and he is a fair guy.
-//
-// Note that it's ownable and the owner wields tremendous power. The ownership
-// will be transferred to a governance smart contract once RADS is sufficiently
-// distributed and the community can show to govern itself.
-//
-// Have fun reading it. Hopefully it's bug-free. God bless.
-contract MasterUranium is Ownable {
+// MasterUranium is the master of RADS and sRADS.
+// The Ownership of this contract is going to be transferred to a timelock
+contract MasterUranium is Ownable, IMasterBonus {
     using SafeMath for uint256;
-    using SafeMath for uint16;
+    using SafeBEP20 for UraniumBEP20;
     using SafeBEP20 for IBEP20;
 
     // Info of each user.
@@ -49,15 +40,15 @@ contract MasterUranium is Ownable {
         uint256 allocPoint;       // How many allocation points assigned to this pool. RADSs to distribute per block.
         uint256 lastRewardBlock;  // Last block number that RADSs distribution occurs.
         uint256 accRadsPerShare; // Accumulated RADSs per share, times 1e12. See below.
-        uint16 depositFeeBP;     // deposit Fee
+        uint256 depositFeeBP;     // deposit Fee
         bool isSRadsRewards;
     }
 
     UraniumBonusAggregator public bonusAggregator;
     // The RADS TOKEN!
-    RadsToken public rads;
+    UraniumBEP20 public rads;
     // The SRADS TOKEN!
-    SRadsToken public sRads;
+    UraniumBEP20 public sRads;
     // Dev address.
     address public devaddr;
     // RADS tokens created per block.
@@ -65,9 +56,6 @@ contract MasterUranium is Ownable {
     // Deposit Fee address
     address public feeAddress;
 
-
-    // Info of each user that stakes LP tokens.
-    mapping (address => bool) public knownPoolLp;
     // Info of each pool.
     PoolInfo[] public poolInfo;
     // Info of each user that stakes LP tokens.
@@ -79,10 +67,10 @@ contract MasterUranium is Ownable {
 
     // Initial emission rate: 1 RADS per block.
     uint256 public immutable initialEmissionRate;
-    // Minimum emission rate: 0.1 RADS per block.
-    uint256 public immutable minimumEmissionRate = 100 finney;
-    // Reduce emission every 9,600 blocks ~ 12 hours.
-    uint256 public immutable emissionReductionPeriodBlocks = 14400;
+    // Minimum emission rate: 0.5 RADS per block.
+    uint256 public minimumEmissionRate = 500 finney;
+    // Reduce emission every 2,8800 blocks ~ 24 hours.
+    uint256 public immutable emissionReductionPeriodBlocks = 28800;
     // Emission reduction rate per period in basis points: 3%.
     uint256 public immutable emissionReductionRatePerPeriod = 300;
     // Last reduction period index
@@ -94,8 +82,8 @@ contract MasterUranium is Ownable {
     event EmissionRateUpdated(address indexed caller, uint256 previousAmount, uint256 newAmount);
 
     constructor(
-        RadsToken _rads,
-        SRadsToken _srads,
+        UraniumBEP20 _rads,
+        UraniumBEP20 _srads,
         UraniumBonusAggregator _bonusAggregator,
         address _devaddr,
         address _feeAddress,
@@ -138,7 +126,7 @@ contract MasterUranium is Ownable {
         return poolInfo.length;
     }
 
-    function userBonus(uint256 _pid, address _user) public view returns (uint16){
+    function userBonus(uint256 _pid, address _user) public view returns (uint256){
         return bonusAggregator.getBonusOnFarmsForUser(_user, _pid);
     }
 
@@ -148,14 +136,11 @@ contract MasterUranium is Ownable {
     }
 
     // Add a new lp to the pool. Can only be called by the owner.
-    // XXX DO NOT add the same LP token more than once. Rewards will be messed up if you do.
-    function add(uint256 _allocPoint, IBEP20 _lpToken, uint16 _depositFeeBP, bool _isSRadsRewards, bool _withUpdate) external onlyOwner {
-        require(_depositFeeBP <= 10000, "add: invalid deposit fee basis points");
+    function add(uint256 _allocPoint, IBEP20 _lpToken, uint256 _depositFeeBP, bool _isSRadsRewards, bool _withUpdate) external onlyOwner {
+        require(_depositFeeBP <= 400, "add: invalid deposit fee basis points");
         if (_withUpdate) {
             massUpdatePools();
         }
-        require(!knownPoolLp[address(_lpToken)], "add: existing pool");
-        knownPoolLp[address(_lpToken)] = true;
         uint256 lastRewardBlock = block.number > startBlock ? block.number : startBlock;
         totalAllocPoint = totalAllocPoint.add(_allocPoint);
         poolInfo.push(PoolInfo({
@@ -170,7 +155,8 @@ contract MasterUranium is Ownable {
     }
 
     // Update the given pool's RADS allocation point. Can only be called by the owner.
-    function set(uint256 _pid, uint256 _allocPoint, uint16 _depositFeeBP, bool _isSRadsRewards, bool _withUpdate) external onlyOwner {
+    function set(uint256 _pid, uint256 _allocPoint, uint256 _depositFeeBP, bool _isSRadsRewards, bool _withUpdate) external onlyOwner {
+        require(_depositFeeBP <= 400, "set: invalid deposit fee basis points");
         if (_withUpdate) {
             massUpdatePools();
         }
@@ -194,10 +180,15 @@ contract MasterUranium is Ownable {
             uint256 radsReward = multiplier.mul(radsPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
             accRadsPerShare = accRadsPerShare.add(radsReward.mul(1e12).div(lpSupply));
         }
-        return user.amountWithBonus.mul(accRadsPerShare).div(1e12).sub(user.rewardDebt);
+        uint256 userRewards = user.amountWithBonus.mul(accRadsPerShare).div(1e12).sub(user.rewardDebt);
+        if(!pool.isSRadsRewards){
+            // taking account of the 2% auto-burn
+            userRewards = userRewards.mul(98).div(100);
+        }
+        return userRewards; // taking account of the 2% auto burn on rads
     }
 
-    // Reduce emission rate by 3% every 9,600 blocks ~ 8hours
+    // Reduce emission rate based on configurations
     function updateEmissionRate() internal {
         if(startBlock > 0 && block.number <= startBlock){
             return;
@@ -261,7 +252,8 @@ contract MasterUranium is Ownable {
         pool.lastRewardBlock = block.number;
     }
 
-    function updateUserBonus(address _user, uint256 _pid, uint256 bonus) external  validatePool(_pid) onlyAggregator{
+    // Allow UraniumBonusAggregator to add bonus on a single pool by id to a specific user
+    function updateUserBonus(address _user, uint256 _pid, uint256 bonus) external virtual override validatePool(_pid) onlyAggregator{
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
         updatePool(_pid);
@@ -354,15 +346,18 @@ contract MasterUranium is Ownable {
     function emergencyWithdraw(uint256 _pid) external {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
-        pool.lpToken.safeTransfer(address(msg.sender), user.amount);
-        emit EmergencyWithdraw(msg.sender, _pid, user.amount);
+        uint256 amount = user.amount;
+        pool.lpSupply = pool.lpSupply.sub(user.amountWithBonus);
         user.amount = 0;
         user.rewardDebt = 0;
+        user.amountWithBonus = 0;
+        pool.lpToken.safeTransfer(address(msg.sender), amount);
+        emit EmergencyWithdraw(msg.sender, _pid, amount);
     }
 
     function getPoolInfo(uint256 _pid) external view
     returns(address lpToken, uint256 allocPoint, uint256 lastRewardBlock,
-            uint256 accRadsPerShare, uint16 depositFeeBP, bool isSRadsRewards) {
+            uint256 accRadsPerShare, uint256 depositFeeBP, bool isSRadsRewards) {
         return (
             address(poolInfo[_pid].lpToken),
             poolInfo[_pid].allocPoint,
@@ -405,6 +400,14 @@ contract MasterUranium is Ownable {
 
     function setFeeAddress(address _feeAddress) external onlyOwner {
         feeAddress = _feeAddress;
+    }
+
+    function updateMinimumEmissionRate(uint256 _minimumEmissionRate) external onlyOwner{
+        require(minimumEmissionRate > _minimumEmissionRate, "must be lower");
+        minimumEmissionRate = _minimumEmissionRate;
+        if(radsPerBlock == minimumEmissionRate){
+            lastReductionPeriodIndex = block.number.sub(startBlock).div(emissionReductionPeriodBlocks);
+        }
     }
 
 }

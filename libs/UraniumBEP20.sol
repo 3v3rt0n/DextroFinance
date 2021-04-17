@@ -15,6 +15,8 @@ contract UraniumBEP20 is Context, IBEP20, Ownable {
     using SafeMath for uint256;
     using Address for address;
 
+    address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+
     mapping(address => uint256) private _balances;
 
     mapping(address => mapping(address => uint256)) private _allowances;
@@ -215,6 +217,9 @@ contract UraniumBEP20 is Context, IBEP20, Ownable {
         emit Transfer(sender, recipient, amount);
     }
 
+    function mint(address _to, uint256 _amount) external virtual onlyOwner{
+        _mint(_to, _amount);
+    }
     /** @dev Creates `amount` tokens and assigns them to `account`, increasing
      * the total supply.
      *
@@ -244,12 +249,12 @@ contract UraniumBEP20 is Context, IBEP20, Ownable {
      * - `account` must have at least `amount` tokens.
      */
     function _burn(address account, uint256 amount) internal {
-        require(account != address(0), "BEP20: burn from the zero address");
+        require(account != BURN_ADDRESS, "BEP20: burn from the zero address");
 
         _balances[account] = _balances[account].sub(amount, "BEP20: burn amount exceeds balance");
         _totalSupply = _totalSupply.sub(amount);
         _burnSupply = _burnSupply.add(amount);
-        emit Transfer(account, address(0), amount);
+        emit Transfer(account, BURN_ADDRESS, amount);
     }
 
     /**

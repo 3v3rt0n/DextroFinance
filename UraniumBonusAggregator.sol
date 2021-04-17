@@ -3,27 +3,34 @@ pragma solidity 0.6.12;
 import "@pancakeswap/pancake-swap-lib/contracts/math/SafeMath.sol";
 import "@pancakeswap/pancake-swap-lib/contracts/access/Ownable.sol";
 
-import "./MasterUranium.sol";
+import "./interfaces/IMasterBonus.sol";
+import "./interfaces/IBonusAggregator.sol";
 
-contract UraniumBonusAggregator is Ownable{
+/*
+The purpose of this contract is to allow us adding bonus to user's reward by adding NFT contracts for example
+without updating the masterChef
+The owner of this contract will be transferred to a timelock
+*/
+contract UraniumBonusAggregator is Ownable, IBonusAggregator{
     using SafeMath for uint256;
-    using SafeMath for uint16;
 
-    MasterUranium master;
+    IMasterBonus master;
 
-    mapping(address => mapping(uint256 => uint16)) public userBonusOnFarms;
+    // pid => address => bonus percent
+    mapping(uint256 => mapping(address => uint256)) public userBonusOnFarms;
 
     mapping (address => bool) public contractBonusSource;
 
     /**
      * @dev Throws if called by any account other than the verified contracts.
+     * Can be an NFT contract for example
      */
     modifier onlyVerifiedContract() {
         require(contractBonusSource[msg.sender], "caller is not in contract list");
         _;
     }
-
-    function setupMaster(MasterUranium _master) external onlyOwner{
+    
+    function setupMaster(IMasterBonus _master) external onlyOwner{
         master = _master;
     }
 
@@ -31,20 +38,19 @@ contract UraniumBonusAggregator is Ownable{
         contractBonusSource[_contract] = _add;
     }
 
-    function addUserBonusOnFarm(address _user, uint16 _percent, uint256 _pid) external onlyVerifiedContract{
-        require(_percent < 10000, "Invalid percent");
-        userBonusOnFarms[_user][_pid] = uint16(userBonusOnFarms[_user][_pid].add(_percent));
-        master.updateUserBonus(_user, _pid, userBonusOnFarms[_user][_pid]);
+    function addUserBonusOnFarm(address _user, uint256 _percent, uint256 _pid) external onlyVerifiedContract{
+        userBonusOnFarms[_pid][_user] = userBonusOnFarms[_pid][_user].add(_percent);
+        require(userBonusOnFarms[_pid][_user] < 10000, "Invalid percent");
+        master.updateUserBonus(_user, _pid, userBonusOnFarms[_pid][_user]);
     }
 
-    function removeUserBonusOnFarm(address _user, uint16 _percent, uint256 _pid) external onlyVerifiedContract{
-        require(_percent < 10000, "Invalid percent");
-        userBonusOnFarms[_user][_pid] = uint16(userBonusOnFarms[_user][_pid].sub(_percent));
-        master.updateUserBonus(_user, _pid, userBonusOnFarms[_user][_pid]);
+    function removeUserBonusOnFarm(address _user, uint256 _percent, uint256 _pid) external onlyVerifiedContract{
+        userBonusOnFarms[_pid][_user] = userBonusOnFarms[_pid][_user].sub(_percent);
+        master.updateUserBonus(_user, _pid, userBonusOnFarms[_pid][_user]);
     }
 
-    function getBonusOnFarmsForUser(address _user, uint256 _pid) public view returns (uint16){
-        return userBonusOnFarms[_user][_pid];
+    function getBonusOnFarmsForUser(address _user, uint256 _pid) external virtual override view returns (uint256){
+        return userBonusOnFarms[_pid][_user];
     }
 
 }

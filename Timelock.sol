@@ -10,10 +10,8 @@
 //
 // Ctrl+f for XXX to see all the modifications.
 
-// XXX: pragma solidity ^0.5.16;
 pragma solidity 0.6.12;
 
-// XXX: import "./SafeMath.sol";
 import "@pancakeswap/pancake-swap-lib/contracts/math/SafeMath.sol";
 
 contract Timelock {
@@ -27,7 +25,7 @@ contract Timelock {
     event QueueTransaction(bytes32 indexed txHash, address indexed target, uint value, string signature, bytes data, uint eta);
 
     uint public constant GRACE_PERIOD = 14 days;
-    uint public constant MINIMUM_DELAY = 6 hours;
+    uint public constant MINIMUM_DELAY = 0 hours;
     uint public constant MAXIMUM_DELAY = 30 days;
 
     address public admin;

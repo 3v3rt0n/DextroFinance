@@ -12,13 +12,15 @@ contract UraniumFactory is IUraniumFactory {
     mapping(address => mapping(address => address)) public getPair;
     address[] public allPairs;
     address private _owner;
+    uint16 private _feeAmount;
 
     event PairCreated(address indexed token0, address indexed token1, address pair, uint);
 
-    constructor(address _feeToSetter, address owner) public {
-        feeToSetter = _feeToSetter;
-        feeTo = _feeToSetter;
+    constructor(address _feeTo, address owner, uint16 _feePercent) public {
+        feeToSetter = owner;
+        feeTo = _feeTo;
         _owner = owner;
+        _feeAmount = _feePercent;
     }
 
     function owner() public view returns (address) {
@@ -29,7 +31,7 @@ contract UraniumFactory is IUraniumFactory {
         return allPairs.length;
     }
 
-    function createPair(address tokenA, address tokenB) external onlyOwner returns (address pair) {
+    function createPair(address tokenA, address tokenB) external returns (address pair) {
         require(tokenA != tokenB, 'UraniumSwap: IDENTICAL_ADDRESSES');
         (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         require(token0 != address(0), 'UraniumSwap: ZERO_ADDRESS');
@@ -54,5 +56,18 @@ contract UraniumFactory is IUraniumFactory {
     function setFeeToSetter(address _feeToSetter) external {
         require(msg.sender == feeToSetter, 'UraniumSwap: FORBIDDEN');
         feeToSetter = _feeToSetter;
+    }
+
+    function feeAmount() external view returns (uint16){
+        return _feeAmount;
+    }
+
+    function setFeeAmount(uint16 _newFeeAmount) external{
+        // This parameter allow us to lower the fee which will be send to the feeManager
+        // 16 = 0.16% (all fee goes directly to the feeManager)
+        // If we update it to 10 for example, 0.06% are going to LP holder and 0.10% to the feeManager
+        require(msg.sender == owner(), "caller is not the owner");
+        require (_newFeeAmount <= 16, "amount too big");
+        _feeAmount = _newFeeAmount;
     }
 }
